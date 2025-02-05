@@ -1,25 +1,34 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"log"
-
 	"github.com/nccapo/kv-store/store"
+	"time"
 )
 
 func main() {
-	kv := store.New()
+	client := store.NewClient(&store.Options{
+		Addr: "rand",
+	})
 
-	kv.Set("key", "bunebam")
+	ctx := context.Background()
 
-	val, _ := kv.Get("key")
-	fmt.Println(val)
+	client.Set(ctx, "mykey", "myvalue", 5*time.Second)
 
-	exist := kv.Exists("key")
-	fmt.Println(exist)
-
-	err := kv.SaveSnapshot()
+	// Get before expiration
+	val, err := client.Get(context.Background(), "mykey")
 	if err != nil {
-		log.Fatalln(err)
+		fmt.Println("Value:", val) // Output: "myvalue"
 	}
+
+	fmt.Println(val)
+	// Wait for expiration
+	time.Sleep(6 * time.Second)
+
+	// Get after expiration
+	if _, err := client.Get(context.Background(), "mykey"); err != nil {
+		fmt.Println("Key expired") // Output: "Key expired"
+	}
+
 }

@@ -1,86 +1,87 @@
+// Package store provides simple KV Storage functionalities
+// package uses RWMutex for concurrent access
 package store
 
 import (
-	"encoding/gob"
+	"context"
 	"fmt"
-	"os"
 	"sync"
-
-	"github.com/nccapo/kv-store/internal/gen"
+	"time"
 )
 
-// KeyValueStore uses a thread safe RWMutex for concurrent access
-type KeyValueStore struct {
-	data map[string]string
-	mu   sync.RWMutex // for concurrent access
+// item is data representation
+type item struct {
+	value    interface{}
+	expireAt time.Time
+	cancel   context.CancelFunc
 }
 
-func New() *KeyValueStore {
-	return &KeyValueStore{
-		data: make(map[string]string),
-	}
+// Store uses a thread safe RWMutex for concurrent access
+type Store struct {
+	data sync.Map
 }
 
-func (kv *KeyValueStore) Set(key, value string) {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-	kv.data[key] = value
-}
+// Set method received (key, value) parameters and set it in-memory using RWMutex for concurrent access
+func (kv *Store) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
+	kCtx, cancel := context.WithTimeout(ctx, expiration)
+	kv.data.Store(key, &item{
+		value:    value,
+		expireAt: time.Now().Add(expiration),
+		cancel:   cancel,
+	})
 
-func (kv *KeyValueStore) Get(key string) (string, bool) {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-
-	val, ok := kv.data[key]
-	return val, ok
-}
-
-func (kv *KeyValueStore) Delete(key string) error {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-
-	_, ok := kv.data[key]
-	if !ok {
-		return fmt.Errorf("key '%s' doesn't exist", key)
-	}
-
-	delete(kv.data, key)
+	go func() {
+		<-kCtx.Done()
+		err := kv.Delete(key)
+		if err != nil {
+			return
+		}
+	}()
 
 	return nil
 }
 
-func (kv *KeyValueStore) Exists(key string) bool {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
+// Get method received key string and search data using key, it returns data and bool value
+func (kv *Store) Get(ctx context.Context, key string) (interface{}, error) {
+	val, ok := kv.data.Load(key)
+	if !ok {
+		return nil, fmt.Errorf("key does not exist")
+	}
 
-	_, ok := kv.data[key]
+	it := val.(*item)
+
+	if time.Now().After(it.expireAt) {
+		err := kv.Delete(key)
+		if err != nil {
+			return nil, err
+		}
+
+		return nil, fmt.Errorf("key expired")
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("context canceled")
+	default:
+		return it.value, nil
+	}
+}
+
+// Delete method received key string and returns error if data with provided key doesn't exist
+func (kv *Store) Delete(key string) error {
+	if val, ok := kv.data.LoadAndDelete(key); ok {
+		it := val.(*item)
+		it.cancel() // Clean up the context
+	}
+	return nil
+}
+
+// Exists method received key string and search key in map, it returns bool value depending on existed data
+func (kv *Store) Exists(key string) bool {
+	_, ok := kv.data.Load(key)
 	if ok {
 		return true
 	}
 
 	return false
-}
-
-func (kv *KeyValueStore) SaveSnapshot() error {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-
-	s := gen.RandStringRunes(10)
-
-	temp, err := os.CreateTemp("", fmt.Sprintf("sanpshot-%s.tmp", s))
-	if err != nil {
-		return err
-	}
-	defer os.Remove(temp.Name())
-
-	encoder := gob.NewEncoder(temp)
-	if err := encoder.Encode(kv.data); err != nil {
-		return err
-	}
-
-	if err := os.Rename(temp.Name(), "snapshot.gob"); err != nil {
-		return err
-	}
-
-	return nil
 }
