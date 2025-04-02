@@ -5,31 +5,89 @@
 ![Issues Welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)
 ![Version](https://img.shields.io/github/v/release/nccapo/kv-store)
 
-# Key-Value Storage (Redis Clone) in Go 
+# Distributed Key-Value Store
 
-## Overview
+A distributed key-value store implementation inspired by etcd, built with Go. This project provides a simple, secure, fast, and reliable distributed key-value store with the following features:
 
-This project is an in-memory key-value storage system inspired by Redis , implemented in Go . The goal of this project is to provide a simple yet powerful tool for storing and retrieving data with features like expiration, atomic operations, and concurrency support. It is designed primarily as a learning exercise to gain more experience with Go programming and concurrent systems.
+- Distributed consensus using the Raft protocol
+- HTTP API for key-value operations
+- TTL (Time-To-Live) support for keys
+- Thread-safe operations
+- Graceful shutdown
 
 ## Features
-- **Thread-Safe** : Uses sync.Map for thread-safe operations.
-- **Key Expiration** : Automatically expires keys after a specified duration.
-- **Batch Operations** : Perform multiple Get or Set operations in a single call.
-- **Persistence** : Save and load data from disk using snapshots.
-- **Monitoring** : Collect metrics for operations like `Set`, `Get`, and `Delete`.
+
+- **Distributed Consensus**: Uses the Raft protocol to ensure consistency across all nodes in the cluster
+- **HTTP API**: RESTful API for key-value operations
+- **TTL Support**: Keys can be set with an expiration time
+- **Thread Safety**: All operations are thread-safe using Go's sync package
+- **Persistence**: Log entries are persisted to disk
+- **Graceful Shutdown**: Clean shutdown of all components
+
+## Getting Started
+
+### Prerequisites
+
+- Go 1.21 or later
+
+### Building
+
+```bash
+go build
+```
+
+### Running
+
+To start a node in the cluster:
+
+```bash
+./kv-store -id node1 -addr :8080 -peers "node2=localhost:8081,node3=localhost:8082"
+```
+
+### API Endpoints
+
+- `GET /v1/kv/{key}` - Get a value by key
+- `PUT /v1/kv/{key}` - Set a value with optional TTL
+- `DELETE /v1/kv/{key}` - Delete a key-value pair
+
+Example request to set a value with TTL:
+
+```bash
+curl -X PUT http://localhost:8080/v1/kv/mykey \
+  -H "Content-Type: application/json" \
+  -d '{"value": "myvalue", "ttl": "5s"}'
+```
+
+## Architecture
+
+The project is organized into the following components:
+
+- `internal/raft`: Raft consensus protocol implementation
+- `internal/api`: HTTP API server
+- `store`: Key-value store implementation
+
+### Raft Protocol
+
+The Raft protocol ensures that all nodes in the cluster maintain a consistent state. The implementation includes:
+
+- Leader election
+- Log replication
+- Membership changes
+- Snapshotting
+
+### Key-Value Store
+
+The key-value store provides:
+
+- Thread-safe operations using sync.Map
+- TTL support for keys
+- Persistence of data
+- Clean error handling
 
 ## Contributing
-We welcome contributions from the community! Here's how you can help:
-1. **Fork the Repository** : Click the "Fork" button on GitHub.
-2. **Clone Your Fork** 
-   ```shell
-    git clone https://github.com/nccapo/kv-store.git
-    ```
-3. **Create a Branch** :
-   ```shell
-    git checkout -b feature/new-feature
-    ```
-4. **Submit a Pull Request** : Push your branch and open a PR against the main branch.
+
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
-This project is licensed under the MIT License. See the [LICENSE](https://github.com/nccapo/kv-store/blob/master/LICENSE) file for details.
+
+This project is licensed under the MIT License - see the LICENSE file for details.

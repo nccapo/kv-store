@@ -11,7 +11,7 @@ import (
 
 // item is data representation
 type item struct {
-	value    interface{}
+	value    string
 	expireAt time.Time
 	cancel   context.CancelFunc
 }
@@ -22,7 +22,7 @@ type Store struct {
 }
 
 // Set method received (key, value) parameters and set it in-memory using RWMutex for concurrent access
-func (kv *Store) Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error {
+func (kv *Store) Set(ctx context.Context, key string, value string, expiration time.Duration) error {
 	kCtx, cancel := context.WithTimeout(ctx, expiration)
 	kv.data.Store(key, &item{
 		value:    value,
@@ -32,7 +32,7 @@ func (kv *Store) Set(ctx context.Context, key string, value interface{}, expirat
 
 	go func() {
 		<-kCtx.Done()
-		err := kv.Delete(key)
+		err := kv.Delete(ctx, key)
 		if err != nil {
 			return
 		}
@@ -42,33 +42,33 @@ func (kv *Store) Set(ctx context.Context, key string, value interface{}, expirat
 }
 
 // Get method received key string and search data using key, it returns data and bool value
-func (kv *Store) Get(ctx context.Context, key string) (interface{}, error) {
+func (kv *Store) Get(ctx context.Context, key string) (string, error) {
 	val, ok := kv.data.Load(key)
 	if !ok {
-		return nil, fmt.Errorf("key does not exist")
+		return "", fmt.Errorf("key does not exist")
 	}
 
 	it := val.(*item)
 
 	if time.Now().After(it.expireAt) {
-		err := kv.Delete(key)
+		err := kv.Delete(ctx, key)
 		if err != nil {
-			return nil, err
+			return "", err
 		}
 
-		return nil, fmt.Errorf("key expired")
+		return "", fmt.Errorf("key expired")
 	}
 
 	select {
 	case <-ctx.Done():
-		return nil, fmt.Errorf("context canceled")
+		return "", fmt.Errorf("context canceled")
 	default:
 		return it.value, nil
 	}
 }
 
 // Delete method received key string and returns error if data with provided key doesn't exist
-func (kv *Store) Delete(key string) error {
+func (kv *Store) Delete(ctx context.Context, key string) error {
 	if val, ok := kv.data.LoadAndDelete(key); ok {
 		it := val.(*item)
 		it.cancel() // Clean up the context

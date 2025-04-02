@@ -2,33 +2,79 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"flag"
+	"log"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+
+	"github.com/nccapo/kv-store/internal/api"
+	"github.com/nccapo/kv-store/internal/raft"
 	"github.com/nccapo/kv-store/store"
-	"time"
 )
 
 func main() {
-	client := store.NewClient(&store.Options{
-		Addr: "rand",
+	// Parse command line flags
+	nodeID := flag.String("id", "", "Node ID")
+	addr := flag.String("addr", ":8080", "HTTP server address")
+	peers := flag.String("peers", "", "Comma-separated list of peer addresses")
+	flag.Parse()
+
+	if *nodeID == "" {
+		log.Fatal("Node ID is required")
+	}
+
+	// Create Raft node
+	node := raft.NewNode(*nodeID, parsePeers(*peers))
+
+	// Create key-value store
+	kvStore := store.NewClient(&store.ClientOptions{
+		Addr: *addr,
 	})
 
-	ctx := context.Background()
+	// Create HTTP API server
+	server := api.NewServer(kvStore, *addr)
 
-	client.Set(ctx, "mykey", "myvalue", 5*time.Second)
+	// Start Raft node
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	// Get before expiration
-	val, err := client.Get(context.Background(), "mykey")
-	if err != nil {
-		fmt.Println("Value:", val) // Output: "myvalue"
+	if err := node.Start(ctx); err != nil {
+		log.Fatalf("Failed to start Raft node: %v", err)
 	}
 
-	fmt.Println(val)
-	// Wait for expiration
-	time.Sleep(6 * time.Second)
+	// Start HTTP server
+	go func() {
+		if err := server.Start(); err != nil {
+			log.Printf("HTTP server error: %v", err)
+		}
+	}()
 
-	// Get after expiration
-	if _, err := client.Get(context.Background(), "mykey"); err != nil {
-		fmt.Println("Key expired") // Output: "Key expired"
+	// Wait for interrupt signal
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+
+	// Graceful shutdown
+	log.Println("Shutting down...")
+	if err := server.Stop(ctx); err != nil {
+		log.Printf("Error stopping HTTP server: %v", err)
+	}
+	node.Stop()
+}
+
+func parsePeers(peers string) map[string]string {
+	if peers == "" {
+		return make(map[string]string)
 	}
 
+	result := make(map[string]string)
+	for _, peer := range strings.Split(peers, ",") {
+		parts := strings.Split(peer, "=")
+		if len(parts) == 2 {
+			result[parts[0]] = parts[1]
+		}
+	}
+	return result
 }
